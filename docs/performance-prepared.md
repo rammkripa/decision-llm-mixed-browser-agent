@@ -1,5 +1,9 @@
 # A real flight search, at real speed
 
+This is a historical prepared recording of the original agent, with its original date
+and measurements preserved. Current research-agent behavior and live-suite comparisons
+are documented in [research-live-results.md](research-live-results.md).
+
 **12.884 seconds on Google Flights.** Zürich → London, one way, Sunday 20 September 2026, one adult, economy. Historical prepared recording (the primary demo has since been replaced) · [Machine-readable evidence](flights-prepared-measurement.json).
 
 | Recorded run | Measurement |

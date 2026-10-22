@@ -356,3 +356,11 @@ def test_enter_dispatches_fixed_key_without_text_generation(monkeypatch):
     keys = [params for method, params in calls if method == 'Input.dispatchKeyEvent']
     assert [(p['type'], p['key']) for p in keys] == [('keyDown', 'Enter'), ('keyUp', 'Enter')]
     assert not any(method == 'Input.insertText' for method, _ in calls)
+
+
+def test_field_helper_receives_observed_metadata_and_other_fields():
+    observed = page()
+    action = {**observed['actions'][0], 'metadata': {'placeholder': 'Choose date', 'type': 'text'}}
+    context = model.field_context('Choose a departure date', action, observed, [])
+    assert context['field']['metadata']['placeholder'] == 'Choose date'
+    assert context['nearby_controls'][0]['label'] == 'Search'

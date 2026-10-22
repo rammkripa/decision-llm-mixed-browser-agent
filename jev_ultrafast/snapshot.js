@@ -63,6 +63,14 @@
     if (rname==='gridcell' && e.querySelector('button,[role="button"]')) continue;
     const base={node:identity(e),role:rname,label:name(e)||rname,
       rect:{x:r.x,y:r.y,w:r.width,h:r.height}};
+    base.metadata={};
+    for (const attr of ['type','placeholder','title','inputmode','aria-haspopup','aria-describedby']) {
+      const value=e.getAttribute(attr);
+      if (value) base.metadata[attr]=value.slice(0,300);
+    }
+    const scope=e.closest('dialog,[role="dialog"],form') || e.parentElement;
+    if (['textbox','combobox','searchbox','spinbutton'].includes(rname))
+      base.metadata.context=(scope && scope!==document.body ? scope.innerText||'' : '').slice(0,1200);
     for (const key of ['checked','selected','expanded']) {
       const value=e.getAttribute('aria-'+key);
       if (value!==null) base[key]=value;

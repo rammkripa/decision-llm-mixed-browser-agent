@@ -150,6 +150,17 @@ def main():
         browser.act(next_month, page)
         assert browser.evaluate('window.advanced') is True
         passed.append('clipped calendar targets excluded while reachable navigation executes')
+        browser.evaluate("document.body.innerHTML='<form><h2>Travel dates</h2>' +"
+                         "'<input aria-label=Departure placeholder=\"Choose date\">' +"
+                         "'<a href=\"#\" title=\"Complete book title\">Complete ...</a></form>'")
+        page = browser.observe(screenshot=False)
+        field = next(a for a in page['actions'] if a['kind'] == 'fill')
+        assert field['metadata']['placeholder'] == 'Choose date'
+        assert 'Travel dates' in field['metadata']['context']
+        from jev_ultrafast.research import capture
+
+        assert any('Complete book title' in b['text'] for b in capture(browser)['blocks'])
+        passed.append('observed field context and full link tooltips reach the readers')
         browser.call("Page.navigate", url="about:blank")
         assert not browser.fresh(page, field)
         passed.append("navigation invalidates the old document")

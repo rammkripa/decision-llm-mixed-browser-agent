@@ -503,6 +503,7 @@ def test_operation_fallback_never_consumes_another_operations_target(monkeypatch
 
 def test_answer_revision_is_bounded_and_never_repeats_browser_mutations(monkeypatch, hybrid):
     hybrid.max_answer_attempts = 2
+    monkeypatch.setattr(hybrid, 'repair_citations', Mock(side_effect=ValueError('No supporting citations')))
     set_decision(monkeypatch, 'DONE', 'DONE')
     checker = Mock(side_effect=[{'passed': True}, {'passed': True}, {'passed': False},
                                {'passed': True}, {'passed': True}])
@@ -598,3 +599,51 @@ def test_statement_filter_uses_indexed_review_over_raw_choices():
                                         {'requirement': 1, 'supported': False}]}}
     assert research.supported_statement_indices(check, 2) == {1}
     assert research.supported_statement_indices(check, 3) == set()
+
+
+def test_citation_repair_recovers_uncited_evidence_without_rewriting(monkeypatch, hybrid):
+    hybrid.evidence = [dict(FACT, url='https://example.test', title='Source', observed_at='now')] * 2
+    monkeypatch.setattr(research, 'generate_json', Mock(side_effect=[
+        {'answer': 'Launch date is known. L2 keeps Webb cold. [1]', 'evidence_ids': [1]},
+        {'citations': [{'statement': 1, 'evidence_ids': [1]}, {'statement': 2, 'evidence_ids': [2]}]},
+    ]))
+    checker = Mock(side_effect=[{'passed': True}, {'passed': False}, {'passed': True}])
+    monkeypatch.setattr(hybrid, 'check', checker)
+    hybrid.finish_goal(hybrid.runner.state['page'])
+    assert hybrid.status == 'done'
+    assert hybrid.result['evidence_ids'] == [1, 2]
+    assert hybrid.result['answer'] == 'Launch date is known. [1]\nL2 keeps Webb cold. [2]'
+    assert hybrid.model_calls['citation_repair'] == 1
+    hybrid.runner.command.assert_not_called()
+
+
+def test_citation_repair_rejects_invented_reference(monkeypatch, hybrid):
+    hybrid.evidence = [FACT]
+    monkeypatch.setattr(research, 'generate_json', lambda *_: {
+        'citations': [{'statement': 1, 'evidence_ids': [999]}]})
+    with pytest.raises(ValueError, match='unobserved evidence'):
+        hybrid.repair_citations(['A claim.'], [])
+
+
+def test_read_consumes_whole_extraction_window(monkeypatch, hybrid):
+    document = deepcopy(DOCUMENT)
+    document['blocks'].append({'id': '2', 'text': 'More information.', 'tag': 'p'})
+    monkeypatch.setattr(research, 'capture', lambda _: document)
+    monkeypatch.setattr(research, 'generate_json', lambda *_: {'facts': [FACT]})
+    set_decision(monkeypatch, 'READ_SECTION', 'read_1')
+    hybrid.tick()
+    assert hybrid.events[-1]['inspected_passages'] == ['1', '2']
+    assert (0, 0, 'snapshot-1', '2') in hybrid.read
+    # A re-read with the same facts cannot inflate the evidence store.
+    hybrid.read.clear()
+    hybrid.tick()
+    assert len(hybrid.evidence) == 1
+    assert hybrid.events[-1]['new_evidence'] == 0
+
+
+def test_decision_evidence_is_bounded_without_discarding_stored_sources():
+    evidence = [{'value': 'x' * 5000, 'quote': 'y' * 5000, 'url': 'https://example.test'}] * 100
+    compact = research.decision_evidence(evidence, limit=6000)
+    assert len(json.dumps(compact)) < 6100
+    assert len(evidence) == 100
+    assert len(evidence[0]['value']) == 5000

@@ -96,7 +96,8 @@ def action_space(actions):
         if node not in indices:
             index = str(len(elements) + 1)
             indices[node] = index
-            element = {k: action[k] for k in ("role", "value", "checked", "selected", "expanded") if k in action}
+            element = {k: action[k] for k in ("role", "value", "checked", "selected", "expanded", "metadata")
+                       if k in action}
             element.update(index=index, label=action["label"].split(" → ")[0], operations=[])
             if kind == "select":
                 element["value"] = action.get("current_value", "")
@@ -196,7 +197,9 @@ def choose(state, goal, history, *, rules=NEXT_ACTION, target_rules=TARGET):
 def field_context(goal, action, page, history):
     return {
         "goal": goal,
-        "field": {k: action.get(k) for k in ("label", "role", "value")},
+        "field": {k: action.get(k) for k in ("label", "role", "value", "metadata")},
+        "nearby_controls": [{k: a.get(k) for k in ("label", "role", "value")}
+                            for a in page["actions"] if a.get("kind") == "fill"],
         "page": {"title": page["title"], "text": page["text"][:6000]},
         "recent_actions": [{k: h.get(k) for k in ("action", "text")} for h in history[-6:]],
     }

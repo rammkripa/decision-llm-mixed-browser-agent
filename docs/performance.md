@@ -1,5 +1,11 @@
 # Faster on the real web
 
+Historical measurements of the original navigation agent. The research planner,
+verification/recovery pipeline and live suite have since changed; these numbers are
+not current `ResearchAgent` performance claims. See [research-live-results.md](research-live-results.md)
+for the later task suite, failures and refinement comparison. Original measurements,
+source hashes and footage below remain unchanged.
+
 The current video completes the Google Flights task in **7.073 seconds at 1×**. It starts with one natural-language goal and uses dynamic controls throughout. Jev selects operation + target in one request; Mercury generates the city strings when TYPE_TEXT is selected.
 
 [Video](demo.mp4) · [Recording measurements](flights-measurement.json) · [Matched run measurements](full-speed-measurement.json)

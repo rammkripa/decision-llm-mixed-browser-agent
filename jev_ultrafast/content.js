@@ -3,12 +3,17 @@
   const paragraphs=[], walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);
   let node, count=0, truncated=false, lastGroup=null;
   while ((node=walker.nextNode())) {
-    const parent=node.parentElement, value=node.textContent.trim();
+    const parent=node.parentElement;
+    let value=node.textContent.trim();
     if (!value || !parent || parent.closest('script,style,noscript,template,input,textarea,select,'+
         '[aria-hidden="true"],[inert]') ||
         !parent.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})) continue;
     const rect=parent.getBoundingClientRect();
     if (!rect.width || !rect.height) continue;
+    // Link tooltips may contain the full name where the visible text is shortened.
+    // This is observed DOM content, not a guessed expansion of the title.
+    if (parent.tagName==='A' && /(?:\.\.\.|…)$/.test(value) && parent.title)
+      value=parent.title.trim();
     const group=parent.closest('p,li,h1,h2,h3,h4,h5,h6,table,pre,blockquote,figcaption,dt,dd') || parent;
     const same=group===lastGroup && paragraphs.length;
     if (!same && paragraphs.length>=400) { truncated=true; break; }
