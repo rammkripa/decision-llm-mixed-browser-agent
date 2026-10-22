@@ -59,12 +59,12 @@ There are no site-specific action scripts or prepared field strings in the polic
 
 ## Try the Minotaur web view
 
-Run `uv run --env-file .env jev-web` and open **http://127.0.0.1:8767**. Give Minotaur a goal to watch its cloud browser, follow its activity, and read answers with supporting sources. Cloud tasks require Browserbase credentials in addition to the model keys (see `.env.example`).
+Run `uv run --env-file .env jev-web` and open **http://127.0.0.1:8767**. Enter a goal on the home page to open a fresh console at `/runs/<id>`. Each run has its own browser, controls, activity, answer, and trace. Return home to start another task without replacing existing runs; recent task links stay in this browser. Cloud tasks require Browserbase credentials in addition to the model keys (see `.env.example`).
 
 ## Deploy the Minotaur console to Vercel
 
 The Vercel adapter serves the console through a Node function and runs each Python task
-in its own Vercel Sandbox. Signed HttpOnly cookies reconnect the browser to its task;
+in its own Vercel Sandbox. A separate signed HttpOnly cookie for each run reconnects its console to the correct task;
 worker state and audit traces survive function restarts. Finished sandboxes are stopped
 when the console observes completion; their snapshots expire after 24 hours. Download
 traces before then. Browserbase sessions retain the 15-minute service timeout and tasks

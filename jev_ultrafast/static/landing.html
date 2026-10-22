@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="console-token" content="__CONSOLE_TOKEN__"><title>Minotaur · Start a task</title><link rel="stylesheet" href="/console.css"></head>
+<body><header><a class="brand" href="/" aria-label="Minotaur home"><span class="mark"><img src="/minotaur.png" alt=""></span> minotaur<span class="brand-note"> / your browser agent</span></a><span class="cloud"><i></i> Browserbase cloud</span></header>
+<main class="landing">
+<div class="heading"><div><p class="eyebrow">HUMAN REASONING. BULLHEADED ACTION.</p><h1>Where should we go next?</h1><p class="lede">Give Minotaur a goal. Each task opens its own live console.</p></div></div>
+<div id="notice" class="notice" role="status" hidden></div>
+<div class="landing-grid"><section class="panel task-panel"><form id="task-form"><div class="panel-title"><span class="number">01</span><h2>Your task</h2></div>
+<label for="goal">What do you want to do?</label><textarea id="goal" required maxlength="2000" placeholder="Find the cheapest book in the Travel category and report its full title, price, and product link."></textarea>
+<label for="url">Start from <span class="optional">optional</span></label><input id="url" type="url" placeholder="https://www.google.com" aria-describedby="url-hint"><p id="url-hint" class="hint">Leave blank to start with Google.</p>
+<button id="run" class="primary" type="submit">Start a new task <span>↗</span></button>
+
+</form>
+<div class="examples"><p class="eyebrow">TRY A TASK</p><button class="example" data-example="flights">Search Google Flights <span>↗</span></button><button class="example" data-example="books">Find a book’s details <span>↗</span></button><button class="example" data-example="webb">Research the Webb telescope <span>↗</span></button><button class="example" data-example="python">Compare Python sorting methods <span>↗</span></button></div>
+</section><section class="landing-art"><img src="/minotaur-maze.png" alt="Minotaur guiding a path through a maze of browser windows"><div><h2>A fresh path for every task.</h2><p>Start something new while your other tasks keep running. Return to any console using its own link.</p></div></section></div>
+<section id="recent-section" class="recent-runs" hidden><div class="panel-title"><h2>Your recent tasks</h2></div><div id="recent-runs"></div><p class="hint">Links saved in this browser. Cloud runs and traces are available for 24 hours.</p></section>
+<section class="about-minotaur" aria-label="About Minotaur"><img src="/minotaur.png" alt="Minotaur, our bull-headed guide" loading="lazy"><div><p class="eyebrow">WHY MINOTAUR?</p><h2>The body of an LLM. The head of Jev.</h2><p>Minotaur is a browser agent with two parts working together. A language model plans, reads, and writes. Jev, TypeSafe’s decision model, chooses the next browser action and its target from the elements on the page. Together, they turn your goal into steps through the maze of the web.</p></div></section><footer class="footer"><span>Minotaur finds the way. Sources stay attached.</span><span id="config-status">Checking connection…</span></footer></main><script type="module" src="/landing.js"></script></body></html>

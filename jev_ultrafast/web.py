@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import re
 import secrets
 import subprocess
 import sys
@@ -11,7 +12,7 @@ import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from .browserbase import Browserbase
 from .web_worker import redact, save
@@ -188,6 +189,71 @@ class Console:
         self.release()
 
 
+class Runs:
+    """Each console owns its own worker, browser, controls, and audit folder."""
+
+    def __init__(self, root):
+        self.root = Path(root)
+        self.lock = threading.RLock()
+        self.consoles = {}
+
+    @staticmethod
+    def valid_id(run_id):
+        return isinstance(run_id, str) and re.fullmatch(r'minotaur-[a-f0-9]{32}', run_id) is not None
+
+    def start(self, body):
+        console = Console(self.root)
+        state = console.start(body)
+        run_id = 'minotaur-' + state['run_id']
+        with self.lock:
+            self.consoles[run_id] = console
+        return self.snapshot(run_id)
+
+    def get(self, run_id):
+        if not self.valid_id(run_id):
+            return None
+        with self.lock:
+            if run_id not in self.consoles:
+                folder = self.root / run_id.removeprefix('minotaur-')
+                try:
+                    state = json.loads((folder / 'console.json').read_text())
+                except (OSError, ValueError):
+                    return None
+                console = Console(self.root)
+                console.folder, console.state = folder, state
+                self.consoles[run_id] = console
+            return self.consoles[run_id]
+
+    def snapshot(self, run_id=None):
+        if run_id is None:
+            return Console(self.root).snapshot()
+        console = self.get(run_id)
+        if console is None:
+            return None
+        return {**console.snapshot(), 'run_id': run_id, 'console_url': '/runs/' + run_id}
+
+    def control(self, run_id, action):
+        console = self.get(run_id)
+        if console is None:
+            raise ValueError('Run not found.')
+        if action == 'release' and console.client is None:
+            console.client = Browserbase()
+        console.control(action)
+        return self.snapshot(run_id)
+
+    def close(self):
+        for console in list(self.consoles.values()):
+            console.close()
+
+
+def run_request(value):
+    parsed = urlparse(value)
+    route = re.fullmatch(r'/api/runs/(minotaur-[a-f0-9]{32})/(state|control|trace)', parsed.path)
+    if route:
+        return '/api/' + route[2], route[1]
+    return parsed.path, parse_qs(parsed.query).get('run_id', [None])[0]
+
+
 class Handler(BaseHTTPRequestHandler):
     def send(self, status, value, mime='application/json'):
         data = value if isinstance(value, bytes) else value.encode()
@@ -209,20 +275,27 @@ class Handler(BaseHTTPRequestHandler):
             self.headers.get('Origin') in (None, f'http://{host}')))
 
     def do_GET(self):
-        path = urlparse(self.path).path
+        path, run_id = run_request(self.path)
         if not self.allowed(path.startswith('/api/')):
             return self.send(403, 'Forbidden', 'text/plain')
         if path == '/api/state':
-            return self.send(200, json.dumps(self.server.console.snapshot()))
+            state = self.server.runs.snapshot(run_id)
+            return self.send(200 if state is not None else 404, json.dumps(
+                state if state is not None else {'error': 'Run not found.'}))
         if path == '/api/trace':
-            folder = self.server.console.folder
+            console = self.server.runs.get(run_id)
+            folder = console.folder if console else None
             if not folder or not (folder / 'trace.json').exists():
                 return self.send(404, json.dumps({'error': 'Trace will be available after the run ends.'}))
             return self.send(200, (folder / 'trace.json').read_bytes())
-        files = {'/': ('console.html', 'text/html'), '/console.js': ('console.js', 'text/javascript'),
+        files = {'/': ('landing.html', 'text/html'), '/console.js': ('console.js', 'text/javascript'),
+                 '/landing.js': ('landing.js', 'text/javascript'),
+                 '/task-examples.js': ('task-examples.js', 'text/javascript'),
                  '/console.css': ('console.css', 'text/css'),
                  '/minotaur.png': ('minotaur.png', 'image/png'),
                  '/minotaur-maze.png': ('minotaur-maze.png', 'image/png')}
+        if path.startswith('/runs/') and Runs.valid_id(path.removeprefix('/runs/')):
+            files[path] = ('console.html', 'text/html')
         if path not in files:
             return self.send(404, 'Not found', 'text/plain')
         filename, mime = files[path]
@@ -241,10 +314,11 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length))
             if not isinstance(body, dict):
                 raise ValueError('Invalid request.')
-            if self.path == '/api/start':
-                state = self.server.console.start(body)
-            elif self.path == '/api/control':
-                state = self.server.console.control(body.get('action'))
+            path, run_id = run_request(self.path)
+            if path == '/api/start':
+                state = self.server.runs.start(body)
+            elif path == '/api/control':
+                state = self.server.runs.control(run_id, body.get('action'))
             else:
                 return self.send(404, json.dumps({'error': 'Not found'}))
             self.send(200, json.dumps(state))
@@ -259,16 +333,16 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description='Local task console with Browserbase cloud execution.')
     parser.add_argument('--port', type=int, default=8767)
     args = parser.parse_args(argv)
-    console = Console(Path.cwd() / 'artifacts' / 'web')
+    runs = Runs(Path.cwd() / 'artifacts' / 'web')
     server = ThreadingHTTPServer(('127.0.0.1', args.port), Handler)
-    server.console, server.token = console, secrets.token_urlsafe(32)
+    server.runs, server.token = runs, secrets.token_urlsafe(32)
     print(f'Minotaur task console: http://127.0.0.1:{server.server_address[1]}', flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
-        console.close()
+        runs.close()
         server.server_close()
 
 
