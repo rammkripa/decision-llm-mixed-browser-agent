@@ -49,3 +49,22 @@ uv run python scripts/verify_research_fixture.py artifacts/research-live-13.json
 The third command deliberately exits 1. The independent oracle checks actual action history, expected fixture values, exact source quotations, answer coverage and source-reference integrity. A model's DONE or verification choice alone is insufficient. Inspect the generated answer and source text as well: the fixture oracle is intentionally narrow.
 
 See research-testing.md for offline tests, the real-browser no-API integration test, and commands for additional live runs. Broader fixtures and real-site tasks remain necessary before making a general-purpose-agent reliability claim.
+
+## Wikipedia CLI regression and follow-up
+
+The reported main-page search stalled when the same autocomplete result appeared as both an option and a nested link. Jev chose CLICK confidently but split target probability between these equivalent representations. Replanning repeated the same ambiguity. Follow-up end-to-end testing exposed additional paragraph-fragmentation, context-size, extraction and semantic-verification failures beyond the initial navigation stall.
+
+The research runner now has bounded text-model routes for uncertain operations and targets, restricted to the same code-owned observed vocabulary. Reading uses semantic paragraph chunks and windows bounded by both choice count and text size. Shared task state and verification sources are deduplicated. Extraction selects observed passage IDs, with quotes copied by code. Uncertain semantic checks can use a separate source-witnessed review. A rejected answer gets at most one generation revision before the same checks run again. Browser mutations are never retried by these routes.
+
+Goal: “Find and summarize Gödel’s incompleteness theorems with sources.” Starting URL: https://en.wikipedia.org/wiki/Main_Page.
+
+| Trace under ignored artifacts/ | Mode | Outcome | Total wall time | Loop time | Browser actions | Replans | Logical model calls |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
+| wikipedia-full-fix-10.json | headless | Completed and independently audited | 28.209 s | 25.147 s | 2 | 0 | 23 |
+| wikipedia-headfull-verified.json | headfull | Completed and independently audited | 18.666 s | 15.307 s | 2 | 0 | 14 |
+
+Both runs actually entered the search, opened the requested article, summarized both theorems with their consistency/effective-axiomatization/arithmetic scope, and returned source links whose quotes match captured passages. The saved summaries were also read against those passages. Source-reference and action-history checks are recorded in artifacts/wikipedia-final-audit.json. This checks the requested browser outcome and source grounding; it is not a formal mathematical proof audit.
+
+The policy/reader/CLI/fixture hashes in the two successful traces are identical. These are one successful run in each mode, not a general reliability benchmark. Nine preceding non-completing development attempts, wikipedia-full-fix-01.json through wikipedia-full-fix-09.json, are retained with their failures across changing implementations. The user's original failure trace was not overwritten. No success-rate claim is made by excluding those attempts.
+
+Logical model-call counts now include target_resolution, decision_resolution, and verification_review in addition to the original categories. The headless run used two synthesis attempts; the visible run used one. The standard CLI command and mode flags are unchanged.

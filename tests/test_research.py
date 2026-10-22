@@ -1,5 +1,6 @@
 """Hybrid planning/reading contracts. Every model and browser dependency is offline."""
 
+import json
 from copy import deepcopy
 from unittest.mock import Mock
 
@@ -66,6 +67,8 @@ def test_read_heads_are_batched_and_unused_click_head_ignored(monkeypatch):
 @pytest.fixture
 def hybrid(monkeypatch):
     monkeypatch.setattr(research, "plan", lambda _: [deepcopy(TASK)])
+    monkeypatch.setattr(research, "resolve_target", lambda *_: None)
+    monkeypatch.setattr(research, "resolve_operation", lambda *_: None)
     monkeypatch.setattr(research, "verify", lambda *_: {"passed": False, "checks": []})
     monkeypatch.setattr(research, "generate_json", lambda *_: {"answer": "Observed outcome", "evidence_ids": []})
     observed = page()
@@ -80,6 +83,7 @@ def hybrid(monkeypatch):
     monkeypatch.setattr(research, "Agent", lambda *_: runner)
     monkeypatch.setattr(research, "capture", lambda _: deepcopy(DOCUMENT))
     agent = research.ResearchAgent("https://example.test/", "Find annual cost for five seats", max_replans=0)
+    agent.max_answer_attempts = 1
     return agent
 
 
@@ -203,7 +207,8 @@ def test_successful_completion_has_verified_result_and_call_counts(monkeypatch, 
     assert state["status"] == "done"
     assert state["result"]["answer"] == "Observed outcome"
     assert state["model_calls"] == {"planning": 1, "decision": 1, "extraction": 0,
-                                    "verification": 3, "synthesis": 1, "typing": 0}
+                                    "verification": 3, "synthesis": 1, "typing": 0,
+                                    "target_resolution": 0, "verification_review": 0, "decision_resolution": 0}
 
 
 def test_rejected_answer_is_not_published(monkeypatch, hybrid):
@@ -316,3 +321,280 @@ def test_final_answer_checks_atomic_statements_and_retains_rejected_draft(monkey
     assert checker.call_args.args[1] == ["Basic costs $600.", "Pro costs $1200."]
     assert hybrid.result is None and len(hybrid.answer_attempts) == 1
     assert not hybrid.answer_attempts[0]["verification"]["passed"]
+
+
+def test_large_documents_are_paged_without_losing_passages(monkeypatch, hybrid):
+    document = deepcopy(DOCUMENT)
+    document['blocks'] = [{'id': str(i), 'text': f'Passage {i}'} for i in range(1, 401)]
+    monkeypatch.setattr(research, 'capture', lambda _: deepcopy(document))
+    offered = []
+
+    def choose(observation, goal, *_args, **_kwargs):
+        reads = [a for a in observation['actions'] if a['kind'] == 'read']
+        assert len(reads) <= model.MAX_CHOICES
+        offered.extend(a['id'] for a in reads)
+        selected = 'read_next' if len(offered) == 200 else 'read_previous'
+        assert selected in {a['id'] for a in observation['actions']}
+        return {**decision(selected), 'operation': selected.upper()}
+
+    monkeypatch.setattr(model, 'choose', choose)
+    hybrid.tick()
+    hybrid.tick()
+    assert offered == [f'read_{i}' for i in range(1, 401)]
+    assert hybrid.content_offsets[document['snapshot_id']] == 0
+    hybrid.runner.command.assert_not_called()
+
+
+def test_oversized_choice_head_fails_before_network(monkeypatch):
+    post = Mock()
+    monkeypatch.setattr(model, 'post_json', post)
+    observed = page()
+    observed['actions'] += [{'id': f'read_{i}', 'kind': 'read', 'node': f'content_{i}',
+                             'label': 'Observed text', 'role': 'passage'} for i in range(256)]
+    with pytest.raises(ValueError, match='TypeSafe allows at most 255'):
+        model.choose(observed, 'Read', [])
+    post.assert_not_called()
+
+
+def test_validation_error_shows_location_without_echoing_input():
+    import httpx
+
+    response = httpx.Response(422, json={'detail': [{
+        'loc': ['body', 'questions', 'read_section_target', 'criteria'],
+        'msg': 'At most 255 choices; private-key', 'input': 'PRIVATE_PAGE_CONTENT'}]})
+    message = model.provider_error(response, 'private-key')
+    assert 'body.questions.read_section_target.criteria' in message
+    assert '255' in message and '[redacted]' in message
+    assert 'PRIVATE_PAGE_CONTENT' not in message and 'private-key' not in message
+
+
+def test_target_resolver_can_only_select_observed_compatible_target(monkeypatch):
+    d = {**decision('e2'), 'operation': 'CLICK', 'target': '1',
+         'target_probabilities': {'1': .6, '2': .4}}
+    monkeypatch.setattr(research, 'generate_json', lambda *_: {'target': '2'})
+    result = research.resolve_target('Search', page(), d, [])
+    assert result['choice'] == 'e3' and result['target'] == '2'
+    assert result['target_resolution']['original_target'] == '1'
+    monkeypatch.setattr(research, 'generate_json', lambda *_: {'target': '#invented-selector'})
+    with pytest.raises(ValueError, match='unobserved target'):
+        research.resolve_target('Search', page(), d, [])
+
+
+def test_target_tie_breaker_keeps_raw_distribution_and_uses_existing_executor(monkeypatch, hybrid):
+    raw = {**decision('e2'), 'operation': 'CLICK', 'confidence': .95, 'target_confidence': .5}
+    monkeypatch.setattr(model, 'choose', lambda *_args, **_kwargs: raw)
+    resolved = {**raw, 'choice': 'e3', 'target_resolution': {'method': 'text_model'}}
+    monkeypatch.setattr(research, 'resolve_target', lambda *_: resolved)
+    hybrid.tick()
+    assert hybrid.model_calls['target_resolution'] == 1
+    assert hybrid.runner.state['decision']['choice'] == 'e3'
+    assert hybrid.events[-1]['decision'] is raw
+    assert hybrid.events[-1]['resolved_decision']['target_confidence'] == .5
+    hybrid.runner.command.assert_called_once()
+
+
+def test_quote_across_captured_inline_fragments_preserves_observed_text():
+    blocks = [{'id': '1', 'text': 'A consistent formal system'},
+              {'id': '2', 'text': 'cannot prove its own consistency.'}]
+    source, quote = research.resolve_quote('A consistent formal system cannot prove its own consistency.', blocks)
+    assert source['id'] == 'context:1,2'
+    assert quote == 'A consistent formal system\ncannot prove its own consistency.'
+    assert quote in source['text']
+
+
+def test_invalid_extraction_retries_generation_once_without_browser_mutation(monkeypatch, hybrid):
+    set_decision(monkeypatch, 'READ_SECTION', 'read_1')
+    generate = Mock(side_effect=[{'facts': [{**FACT, 'quote': 'Invented quote'}]}, {'facts': [FACT]}])
+    monkeypatch.setattr(research, 'generate_json', generate)
+    hybrid.tick()
+    assert hybrid.model_calls['extraction'] == 2
+    assert hybrid.events[-1]['extraction_retried']
+    assert len(hybrid.evidence) == 1
+    hybrid.runner.command.assert_not_called()
+
+
+def test_content_windows_bound_text_and_preserve_every_passage():
+    blocks = [{'id': str(i), 'text': 'x' * 2000} for i in range(7)]
+    windows = research.content_windows(blocks)
+    assert [offset for offset, _ in windows] == [0, 3, 6]
+    assert [block for _, window in windows for block in window] == blocks
+    assert all(sum(len(b['text']) for b in window) <= research.CONTENT_WINDOW_CHARS for _, window in windows)
+
+
+def test_shared_goal_is_sent_once_across_speculative_heads(monkeypatch):
+    goal = 'UNIQUE_GOAL_SENTINEL'
+    captured = []
+    def post(_url, _key, body):
+        captured.append(body)
+        return {'model': 'offline', 'answers': {
+            'operation': choice(body['questions']['operation']['criteria'], 'DONE')}}
+    monkeypatch.setenv('TYPESAFE_API_KEY', 'offline')
+    monkeypatch.setattr(model, 'post_json', post)
+    model.choose(page(), goal, [])
+    assert json.dumps(captured[0]).count(goal) == 1
+    assert captured[0]['state']['goal'] == goal
+
+
+def test_verification_deduplicates_shared_source_context(monkeypatch):
+    captured = []
+    def post(_url, _key, body):
+        captured.append(body)
+        return {'answers': {'0': choice(['supported', 'missing'], 'supported')}}
+    monkeypatch.setenv('TYPESAFE_API_KEY', 'offline')
+    monkeypatch.setattr(model, 'post_json', post)
+    facts = [{**FACT, 'url': 'https://example.test', 'context_text': 'One shared source.'} for _ in range(2)]
+    research.verify('Get facts', ['A requirement'], page(), facts)
+    assert len(captured[0]['state']['sources']) == 1
+    assert [e['source'] for e in captured[0]['state']['evidence']] == [0, 0]
+
+
+def test_extractor_selects_code_owned_quote_without_copying_text(monkeypatch):
+    fact = {'requirement': 1, 'value': 'Five seats cost $600 annually.', 'quote_id': '1'}
+    monkeypatch.setattr(research, 'generate_json', lambda *_: {'facts': [fact]})
+    evidence = research.extract(TASK, DOCUMENT['blocks'][0], DOCUMENT)[0]
+    assert evidence['quote'] == DOCUMENT['blocks'][0]['text']
+    assert evidence['source_text'] == evidence['quote']
+    monkeypatch.setattr(research, 'generate_json', lambda *_: {'facts': [{**fact, 'quote_id': 'invented'}]})
+    with pytest.raises(ValueError, match='unobserved quote_id'):
+        research.extract(TASK, DOCUMENT['blocks'][0], DOCUMENT)
+
+
+def test_uncertain_verification_routes_to_source_witnessed_review(monkeypatch, hybrid):
+    uncertain = {'passed': False, 'checks': [
+        {'choice': 'supported', 'probabilities': {'supported': .75, 'missing': .25}, 'confidence': .5}]}
+    monkeypatch.setattr(research, 'verify', lambda *_: uncertain)
+    monkeypatch.setattr(research, 'generate_json', lambda *_: {
+        'checks': [{'requirement': 1, 'supported': True, 'source_ids': ['1']}]})
+    result = hybrid.check(['Observed fact'], page(), [])
+    assert result['passed'] and not result['jev_passed']
+    assert hybrid.model_calls['verification_review'] == 1
+    assert result['text_review']['sources']['1']['source_text'] == page()['text']
+
+
+def test_requirement_review_rejects_invented_source(monkeypatch):
+    monkeypatch.setattr(research, 'generate_json', lambda *_: {
+        'checks': [{'requirement': 1, 'supported': True, 'source_ids': ['invented']}]})
+    with pytest.raises(ValueError, match='unobserved source'):
+        research.review_requirements('Read', ['A fact'], page(), [])
+
+
+def test_confidently_missing_requirement_is_not_overridden(monkeypatch, hybrid):
+    monkeypatch.setattr(research, 'verify', lambda *_: {'passed': False, 'checks': [
+        {'choice': 'missing', 'confidence': .95, 'probabilities': {'supported': .02, 'missing': .98}}]})
+    reviewer = Mock()
+    monkeypatch.setattr(research, 'review_requirements', reviewer)
+    assert not hybrid.check(['Missing fact'], page(), [])['passed']
+    reviewer.assert_not_called()
+
+
+def test_operation_fallback_never_consumes_another_operations_target(monkeypatch):
+    raw = {**decision('e2'), 'operation': 'CLICK'}
+    monkeypatch.setattr(research, 'generate_json', lambda *_: {'operation': 'TYPE_TEXT', 'target': '2'})
+    with pytest.raises(ValueError, match='unobserved target'):
+        research.resolve_operation('Search', page(), raw, [])
+    monkeypatch.setattr(research, 'generate_json', lambda *_: {'operation': 'CLICK', 'target': '2'})
+    resolved = research.resolve_operation('Search', page(), raw, [])
+    assert resolved['choice'] == 'e3' and resolved['confidence'] is None
+    assert resolved['probabilities'] == {'e3': None}
+    monkeypatch.setattr(research, 'generate_json', lambda *_: {'operation': 'WAIT', 'target': '1'})
+    with pytest.raises(ValueError, match='targetless operation'):
+        research.resolve_operation('Search', page(), raw, [])
+
+
+def test_answer_revision_is_bounded_and_never_repeats_browser_mutations(monkeypatch, hybrid):
+    hybrid.max_answer_attempts = 2
+    set_decision(monkeypatch, 'DONE', 'DONE')
+    checker = Mock(side_effect=[{'passed': True}, {'passed': True}, {'passed': False},
+                               {'passed': True}, {'passed': True}])
+    monkeypatch.setattr(research, 'verify', checker)
+    monkeypatch.setattr(research, 'generate_json', Mock(side_effect=[
+        {'answer': 'Unsupported wording.', 'evidence_ids': []},
+        {'answer': 'Supported wording.', 'evidence_ids': []}]))
+    hybrid.tick()
+    assert hybrid.status == 'done' and hybrid.result['answer'] == 'Supported wording.'
+    assert len(hybrid.answer_attempts) == 2
+    assert hybrid.model_calls['synthesis'] == 2
+    hybrid.runner.command.assert_not_called()
+
+
+@pytest.mark.parametrize('resume', [True, False])
+def test_captcha_handoff_precedes_models_and_mutations(monkeypatch, hybrid, resume):
+    challenge = {**page(), 'text': 'Our systems have detected unusual traffic from your computer network.'}
+    hybrid.runner.browser.observe.return_value = challenge
+    handler = Mock(return_value=resume)
+    hybrid.human_handoff = handler
+    choose = Mock()
+    capture = Mock()
+    monkeypatch.setattr(model, 'choose', choose)
+    monkeypatch.setattr(research, 'capture', capture)
+    hybrid.runner.state['decision'] = {'choice': 'old'}
+    hybrid.runner.pending_text = ('old', 'text')
+    result = hybrid.tick()
+    assert result['status'] == ('ready' if resume else 'blocked')
+    handler.assert_called_once_with(challenge)
+    choose.assert_not_called()
+    capture.assert_not_called()
+    hybrid.runner.command.assert_not_called()
+    assert hybrid.runner.state['decision'] is None
+    assert hybrid.runner.pending_text is None
+    assert hybrid.events[-1]['resumed'] is resume
+    if resume:
+        # A second tick must use the new page rather than replaying a saved action.
+        hybrid.runner.browser.observe.return_value = page()
+        capture.side_effect = StalePage('Fresh observation')
+        hybrid.tick()
+        assert hybrid.runner.browser.observe.call_count == 2
+        capture.assert_called_once()
+
+
+def test_regular_page_does_not_require_human_verification():
+    assert not research.needs_human_verification(page())
+
+
+def test_invalid_operation_resolution_is_rejected_without_crashing(monkeypatch, hybrid):
+    set_decision(monkeypatch, 'WAIT', 'wait', confidence=.39)
+    resolver = Mock(side_effect=ValueError('Operation resolver returned an unobserved target'))
+    monkeypatch.setattr(research, 'resolve_operation', resolver)
+    result = hybrid.tick()
+    assert result['status'] == 'ready'
+    assert hybrid.events[-1]['status'] == 'uncertain'
+    assert 'unobserved target' in hybrid.events[-1]['resolution_error']
+    hybrid.runner.command.assert_not_called()
+    # Repeated invalid generations stop under the existing recovery budget.
+    hybrid.tick()
+    result = hybrid.tick()
+    assert result['status'] == 'blocked'
+    assert resolver.call_count == 3
+    hybrid.runner.command.assert_not_called()
+
+
+@pytest.mark.parametrize('remaining_goal_passes', [True, False])
+def test_suppression_after_revision_rechecks_remaining_goal(monkeypatch, hybrid, remaining_goal_passes):
+    hybrid.max_answer_attempts = 2
+    verdict = {'passed': False, 'checks': [choice(['supported', 'missing'], 'supported'),
+                                          choice(['supported', 'missing'], 'missing')]}
+    checker = Mock(side_effect=[{'passed': True}, verdict, {'passed': True}, verdict,
+                                {'passed': True}, {'passed': remaining_goal_passes}])
+    monkeypatch.setattr(hybrid, 'check', checker)
+    writer = Mock(return_value={'answer': 'Flight costs $62. Airports are unavailable.', 'evidence_ids': []})
+    monkeypatch.setattr(research, 'generate_json', writer)
+    hybrid.finish_goal(hybrid.runner.state['page'])
+    assert writer.call_count == 2
+    assert checker.call_args_list[-2].args[0] == ['Flight costs $62.']
+    assert checker.call_args_list[-1].args[1]['candidate_answer'] == 'Flight costs $62.'
+    assert hybrid.answer_attempts[-1]['suppressed_statements'] == ['Airports are unavailable.']
+    if remaining_goal_passes:
+        assert hybrid.status == 'done'
+        assert hybrid.result['answer'] == 'Flight costs $62.'
+    else:
+        assert hybrid.status == 'blocked'
+        assert hybrid.result is None
+    hybrid.runner.command.assert_not_called()
+
+
+def test_statement_filter_uses_indexed_review_over_raw_choices():
+    check = {'checks': [choice(['supported', 'missing'], 'supported')] * 2,
+             'text_review': {'checks': [{'requirement': 2, 'supported': True},
+                                        {'requirement': 1, 'supported': False}]}}
+    assert research.supported_statement_indices(check, 2) == {1}
+    assert research.supported_statement_indices(check, 3) == set()

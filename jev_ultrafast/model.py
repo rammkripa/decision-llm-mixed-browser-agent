@@ -11,6 +11,27 @@ import httpx
 from .questions import NEXT_ACTION, TARGET, TEXT_VALUE
 
 CLIENT = httpx.Client(http2=True, timeout=25)
+MAX_CHOICES = 255
+
+
+def provider_error(response, key):
+    try:
+        payload = response.json()
+        error = payload.get("error", {}) if isinstance(payload, dict) else {}
+        detail = error.get("message", "") if isinstance(error, dict) else str(error)
+        if not detail and isinstance(payload, dict):
+            detail = payload.get("message", "")
+            validation = payload.get("detail", "")
+            if isinstance(validation, list):
+                # Do not echo validation 'input': it may contain the entire page or secrets.
+                detail = "; ".join(
+                    ".".join(map(str, item.get("loc", []))) + ": " + str(item.get("msg", "invalid value"))
+                    for item in validation[:5] if isinstance(item, dict))
+            elif isinstance(validation, str) and validation:
+                detail = validation
+        return str(detail).replace(key, "[redacted]")[:1000] if key else str(detail)[:1000]
+    except (ValueError, AttributeError):
+        return ""
 
 
 def text_options(base, name, limit):
@@ -37,12 +58,7 @@ def post_json(url, key, body):
             time.sleep(0.5 * 2**attempt)
             continue
         if response.is_error:
-            try:
-                error = response.json().get("error", {})
-                detail = str(error.get("message", "")) if isinstance(error, dict) else ""
-                detail = detail.replace(key, "[redacted]")[:500]
-            except (ValueError, AttributeError):
-                detail = ""
+            detail = provider_error(response, key)
             raise RuntimeError(f"Model provider returned HTTP {response.status_code}; no action executed. {detail}")
         return response.json()
     raise RuntimeError("Model unavailable")
@@ -69,7 +85,8 @@ def validate_choice(answer, ids):
 def action_space(actions):
     """One index per observed element; each operation has its own valid target choices."""
     elements, indices, targets, controls = [], {}, {}, {}
-    operations = {"click": "CLICK", "fill": "TYPE_TEXT", "select": "SELECT", "read": "READ_SECTION"}
+    operations = {"click": "CLICK", "fill": "TYPE_TEXT", "enter": "PRESS_ENTER",
+                  "select": "SELECT", "read": "READ_SECTION"}
     for action in actions:
         kind = action["kind"]
         if kind not in operations:
@@ -104,6 +121,7 @@ def choose(state, goal, history, *, rules=NEXT_ACTION, target_rules=TARGET):
     labels = {
         "CLICK": "Click an element, button, menu option, autocomplete suggestion, or calendar day.",
         "TYPE_TEXT": "Enter or replace text in an editable field. A small LLM will supply the value from the goal.",
+        "PRESS_ENTER": "Press Enter in an observed field to submit its current value or accept a suggestion.",
         "SELECT": "Select an observed dropdown value.",
         "READ_SECTION": "Read an observed passage and extract relevant facts with exact supporting quotes.",
     }
@@ -111,9 +129,13 @@ def choose(state, goal, history, *, rules=NEXT_ACTION, target_rules=TARGET):
     operations.update({key: value["label"] for key, value in controls.items()})
     operations.update(DONE="Every requirement is visibly satisfied.", BLOCKED="No supported operation can progress.")
     questions = {
-        "operation": {"type": "choice", "criteria": operations, "instructions": {"goal": goal, "rules": rules}}
+        "operation": {"type": "choice", "criteria": operations,
+                      "instructions": {"goal": "Use state.goal", "rules": rules}}
     }
     for operation, candidates in targets.items():
+        if len(candidates) > MAX_CHOICES:
+            raise ValueError(f"{operation} has {len(candidates)} targets; TypeSafe allows at most {MAX_CHOICES}. "
+                             "Offer a bounded window with paging; no request or action executed.")
         questions[operation.lower() + "_target"] = {
             "type": "choice",
             "criteria": {
@@ -124,11 +146,12 @@ def choose(state, goal, history, *, rules=NEXT_ACTION, target_rules=TARGET):
                 }
                 for index, a in candidates.items()
             },
-            "instructions": {"goal": goal, "operation": operation, "rules": [rules, target_rules]},
+            "instructions": {"goal": "Use state.goal", "operation": operation, "rules": [rules, target_rules]},
         }
     body = {
         "model": os.environ.get("TYPESAFE_MODEL", "jev-latest"),
         "state": {
+            "goal": goal,
             "page": {k: state[k] for k in ("url", "title", "text")},
             "elements": elements,
             "recent_actions": [

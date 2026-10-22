@@ -54,7 +54,7 @@ def main():
     def generate(instructions, context):
         if "passage" in context:
             text = context["passage"]["text"]
-            return {"facts": [{"requirement": 1, "value": text, "quote": text}]}
+            return {"facts": [{"requirement": 1, "value": text, "quote_id": context["passage"]["id"]}]}
         return {"answer": "Basic costs $600 USD annually; Pro costs $1200 USD for five seats, taxes excluded. "
                           "Cancel 30 days before renewal. Annual payments are non-refundable except duplicate "
                           "charges reported within 14 days.", "evidence_ids": [1, 2, 3]}
@@ -83,6 +83,8 @@ def main():
                 agent.runner.browser.evaluate("""(() => {
                   const area=document.createElement('textarea'); area.id='reader-private';
                   area.textContent='PRIVATE_FORM_VALUE'; document.body.append(area);
+                  const inline=document.createElement('p'); inline.id='reader-inline';
+                  inline.innerHTML='A <a href="#">linked</a> paragraph.'; document.body.append(inline);
                   const large=document.createElement('p'); large.id='reader-large';
                   large.textContent='x'.repeat(65000); document.body.append(large);
                 })()""")
@@ -90,7 +92,9 @@ def main():
                 assert capped["truncated"] and len(capped["blocks"]) <= 400
                 assert sum(len(b["text"]) for b in capped["blocks"]) <= 60000
                 assert not any("PRIVATE_FORM_VALUE" in b["text"] for b in capped["blocks"])
+                assert any(b["text"] == "A linked paragraph." for b in capped["blocks"])
                 agent.runner.browser.evaluate("""document.getElementById('reader-private').remove();
+                  document.getElementById('reader-inline').remove();
                   document.getElementById('reader-large').remove();""")
                 for state in agent.run():
                     if len(agent.events) > 20:

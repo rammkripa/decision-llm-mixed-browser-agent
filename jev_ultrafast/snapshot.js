@@ -57,6 +57,9 @@
     if (!safe(e) || !visible(e) || e.matches(':disabled') || e.closest('[aria-disabled="true"]')) continue;
     const r=e.getBoundingClientRect(), x=r.x+r.width/2, y=r.y+r.height/2, rname=role(e);
     if (!rname || r.width<=0 || r.height<=0 || x<0 || y<0 || x>=innerWidth || y>=innerHeight) continue;
+    // Layout rectangles can extend beyond clipped calendars or sit under overlays.
+    // Offer only controls whose execution point is actually reachable, as the executor requires.
+    if (!e.contains(document.elementFromPoint(x,y))) continue;
     if (rname==='gridcell' && e.querySelector('button,[role="button"]')) continue;
     const base={node:identity(e),role:rname,label:name(e)||rname,
       rect:{x:r.x,y:r.y,w:r.width,h:r.height}};
@@ -76,7 +79,11 @@
       const value='value' in e ? String(e.value) :
         e.isContentEditable || rname==='combobox' ? e.innerText.trim() : '';
       actions.push({...base,kind:editable?'fill':'click',value});
-      if (editable) actions.push({...base,kind:'click',value,label:'Open '+base.label});
+      if (editable) {
+        actions.push({...base,kind:'click',value,label:'Focus '+base.label});
+        if (e.tagName==='INPUT' || ['searchbox','combobox'].includes(rname))
+          actions.push({...base,kind:'enter',value,label:'Press Enter in '+base.label});
+      }
     }
   }
   const words=[], walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);

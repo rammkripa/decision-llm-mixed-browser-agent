@@ -318,3 +318,41 @@ def test_navigation_during_prediction_reobserves_without_action(runner):
     assert runner.state["status"] == "ready"
     assert runner.state["decision"] is None
     runner.state["browser"].act.assert_not_called()
+
+
+def test_enter_uses_only_its_observed_target_head(monkeypatch):
+    state = page()
+    state['actions'].append({'id': 'e4', 'kind': 'enter', 'node': 10,
+                             'label': 'Press Enter in Search', 'value': 'books', 'role': 'textbox'})
+
+    def post(_url, _key, body):
+        assert set(body['questions']['press_enter_target']['criteria']) == {'1'}
+        return {'model': 'test', 'answers': {
+            'operation': choice(body['questions']['operation']['criteria'], 'PRESS_ENTER'),
+            'press_enter_target': choice(['1'], '1'),
+            'click_target': {'choice': 'invented'}, 'type_text_target': {'choice': 'invented'},
+        }}
+
+    monkeypatch.setenv('TYPESAFE_API_KEY', 'test')
+    monkeypatch.setattr(model, 'post_json', post)
+    result = model.choose(state, 'Search for books', [])
+    assert result['operation'] == 'PRESS_ENTER'
+    assert result['choice'] == 'e4'
+
+
+def test_enter_dispatches_fixed_key_without_text_generation(monkeypatch):
+    import jev_ultrafast.browser as browser
+
+    calls = []
+
+    def cdp(method, **params):
+        calls.append((method, params))
+        return {'result': {'value': {'x': 10, 'y': 20}}}
+
+    monkeypatch.setattr(browser, 'cdp', cdp)
+    assert browser_operation({'operation': 'act', 'session': 'test', 'action': {
+        'id': 'e1', 'kind': 'enter', 'node': 1,
+    }}) == {'executed': 'e1'}
+    keys = [params for method, params in calls if method == 'Input.dispatchKeyEvent']
+    assert [(p['type'], p['key']) for p in keys] == [('keyDown', 'Enter'), ('keyUp', 'Enter')]
+    assert not any(method == 'Input.insertText' for method, _ in calls)

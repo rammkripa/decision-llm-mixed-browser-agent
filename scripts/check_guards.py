@@ -20,7 +20,7 @@ def main():
     try:
         page = browser.observe(screenshot=False)
         action = next(a for a in page["actions"] if a["label"] == "Continue")
-        browser.evaluate("document.querySelector('#target').style.transform='translateX(200px)'")
+        browser.evaluate("document.querySelector('#target').style.transform='translateY(5px)'")
         assert browser.fresh(page), "Movement should use fresh geometry, not another model call"
         browser.act(action, page)
         assert browser.evaluate("window.clicks") == 1
@@ -53,11 +53,11 @@ def main():
                          "document.querySelector('#target').style.display='block'")
         page = browser.observe(screenshot=False)
         action = next(a for a in page["actions"] if a["label"] == "Delete account")
-        # A textless overlay does not alter the model's semantic state, but must block a click.
+        # A textless overlay removes reachable actions and must still block an old click.
         browser.evaluate("const cover=document.createElement('div'); "
                          "cover.style.cssText='position:fixed;inset:0;z-index:9999;background:white'; "
                          "document.body.append(cover)")
-        assert browser.fresh(page)
+        assert not browser.fresh(page)
         try:
             browser.act(action, page)
         except (RuntimeError, StalePage):
@@ -124,6 +124,32 @@ def main():
         assert value == "Generated", repr(value)
         assert any(a.get("role") == "option" for a in page["actions"])
         passed.append("real text input waits for asynchronous combobox suggestions")
+        browser.evaluate("document.body.innerHTML='<form><input aria-label=Query name=q>' +"
+                         "'<textarea aria-label=Notes></textarea><button hidden>Submit</button></form>';"
+                         "window.submissions=0; document.querySelector('form').onsubmit=e=>{"
+                         "e.preventDefault(); window.submissions++;"
+                         "window.submittedQuery=new FormData(e.target).get(\"q\")}")
+        page = browser.observe(screenshot=False)
+        assert not any(a['kind'] == 'enter' and a['role'] == 'textbox' and a['label'].endswith('Notes')
+                       for a in page['actions'])
+        field = next(a for a in page['actions'] if a['kind'] == 'fill' and a['label'] == 'Query')
+        browser.act(field, page, text='test search')
+        page = browser.observe(screenshot=False)
+        enter = next(a for a in page['actions'] if a['kind'] == 'enter')
+        browser.act(enter, page)
+        browser.observe(screenshot=False)
+        assert browser.evaluate('window.submissions') == 1
+        assert browser.evaluate('window.submittedQuery') == 'test search'
+        passed.append('Enter submits the observed field once with its existing value')
+        browser.evaluate("document.body.innerHTML='<div style=\"width:180px;overflow:hidden\">' +"
+                         "'<div style=\"width:600px\"><button style=\"margin-left:200px\">Future date</button>' +"
+                         "'</div></div><button onclick=\"window.advanced=true\">Next month</button>'")
+        page = browser.observe(screenshot=False)
+        assert not any(a['label'] == 'Future date' for a in page['actions'])
+        next_month = next(a for a in page['actions'] if a['label'] == 'Next month')
+        browser.act(next_month, page)
+        assert browser.evaluate('window.advanced') is True
+        passed.append('clipped calendar targets excluded while reachable navigation executes')
         browser.call("Page.navigate", url="about:blank")
         assert not browser.fresh(page, field)
         passed.append("navigation invalidates the old document")

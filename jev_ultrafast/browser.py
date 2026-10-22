@@ -145,7 +145,10 @@ def browser_operation(request):
               const e=window.__jevFast?.nodes.get(action.node);
               if (!e?.isConnected || e.matches(':disabled') || e.closest('[aria-disabled="true"],[inert]') ||
                   !e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})) return null;
-              if (action.kind==='fill' && (e.readOnly || e.getAttribute('aria-readonly')==='true')) return null;
+              if (['fill','enter'].includes(action.kind) &&
+                  (e.readOnly || e.getAttribute('aria-readonly')==='true')) return null;
+              if (action.kind==='enter' && !(e.tagName==='INPUT' ||
+                  ['searchbox','combobox'].includes(e.getAttribute('role')))) return null;
               const r=e.getBoundingClientRect(), x=r.x+r.width/2, y=r.y+r.height/2;
               if (!r.width || !r.height || x<0 || y<0 || x>=innerWidth || y>=innerHeight) return null;
               if (!e.contains(document.elementFromPoint(x,y))) return null;
@@ -166,6 +169,11 @@ def browser_operation(request):
                 x, y = target["x"], target["y"]
                 for event in ("mousePressed", "mouseReleased"):
                     call("Input.dispatchMouseEvent", type=event, x=x, y=y, button="left", clickCount=1)
+                if kind == "enter":
+                    for event in ("keyDown", "keyUp"):
+                        call("Input.dispatchKeyEvent", type=event, key="Enter", code="Enter",
+                             windowsVirtualKeyCode=13, nativeVirtualKeyCode=13,
+                             **({"text": "\r"} if event == "keyDown" else {}))
                 if kind == "fill":
                     call(
                         "Input.dispatchKeyEvent",

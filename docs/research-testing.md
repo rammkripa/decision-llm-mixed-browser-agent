@@ -6,7 +6,31 @@ The opt-in `ResearchAgent` wraps Ultrafast's guarded mutation executor with an L
 
 One owned Chrome tab, one initial plan (1–8 sequential subtasks), up to two planning recoveries, at most 120 decision events and the existing 60-action budget. Replanning retains evidence, observed state and recent actions; the original goal remains the final contract. Reads consume captured immutable passages, including rendered content below the viewport. Hidden content, script text, and form values are excluded from the document reader. Native controls still use the original executor. Every fact includes URL, title, passage ID, content hash, capture time, exact quote and source passage. Matching a quote verifies its presence, not its interpretation; separate semantic checks assess support.
 
-The control and document reads are separate observations. Document identity and URL must agree. Actions retain existing freshness guards; extraction cites its historical capture rather than claiming the page is still unchanged. The reader caps content at 60,000 characters and approximately 400 text-node passages and reports truncation. The agent can scroll to reveal omitted controls, but does not yet page through truncated document content. A missing passage is not proof of absence.
+The control and document reads are separate observations. Document identity and URL must agree. Actions retain existing freshness guards; extraction cites its historical capture rather than claiming the page is still unchanged. The reader caps content at 60,000 characters and 400 semantic paragraph chunks and reports truncation. The agent can scroll to reveal omitted controls, but does not yet page through truncated document content. A missing passage is not proof of absence.
+
+Visible text is grouped into semantic paragraphs across inline links and formatting.
+Captured passages are offered in windows of at most 200 passages and 6,000 text characters, with READ_NEXT and READ_PREVIOUS
+operations to reach other captured windows without browser mutation. This keeps each
+TypeSafe Choice question within its 255-option limit. Paging is distinct from document
+truncation: it exposes all captured passages but does not retrieve content beyond the
+reader's capture cap. Oversized target heads fail locally before a request is sent.
+Provider validation errors report their field locations and messages without echoing
+the rejected input or authorization key.
+
+Task context is shared once in the TypeSafe state, and repeated verification source
+contexts are deduplicated. This bounds the work per reading decision as well as the
+number of offered choices. Extraction reads the complete offered section and selects
+code-owned passage IDs; code copies those quotations. A malformed extraction gets
+one counted generation correction, without repeating browser input.
+
+Uncertain mutation targets can route to a text-model tie-breaker over compatible
+observed targets. Uncertain operations can route to a typed operation/target decision
+using the same observed vocabulary. These routes do not manufacture probabilities;
+their provenance and model-call counts are retained in the trace. All browser guards
+still run. Uncertain verification can route to a separate text review requiring a
+valid source witness for each supported requirement. Confidently missing requirements
+remain incomplete. An invalid review fails closed. Rejected answers get at most one
+generation revision, followed by the same goal and statement checks.
 
 Mutation confidence below 0.6, considering both operation and selected target, causes reobservation. Read-only passage choices use an operation-confidence floor of 0.25 and do not reject uncertainty between compatible passages. DONE requests a separate evidence check regardless of selection confidence. Three consecutive uncertain choices, three failed explicit subtask checks, a BLOCKED choice, or an unsupported original-goal check trigger bounded replanning. Exhausting the recovery budget stops the run. Extraction also triggers a subtask check when facts were obtained. Verification requires supported probability at least 0.9 and confidence at least 0.6 for every requirement. These are provisional engineering defaults, not calibrated accuracy claims. A separate original-goal check assesses the candidate answer and executed outcomes, catching requirements omitted by planning. Atomic statements from the generated answer receive another support check against the selected evidence and final page state. This is a model-based assessment, not an independent factual oracle. Rejected drafts are retained in the trace but not published as a result.
 
@@ -41,6 +65,12 @@ uv run python scripts/check_research.py
 `check_research.py` starts an ephemeral loopback HTTP server and opens only the local fixture. Deterministic model doubles drive the production hybrid loop through typing, form submission, navigation, extraction and verification. An API trap fails if any paid model request escapes the doubles. The independent fixture oracle checks Basic $600, Pro $1200, taxes excluded, 30-day cancellation, and the 14-day duplicate-charge exception. It also checks hidden instructions are excluded and offscreen rendered text is readable. Output: `artifacts/research-local-smoke.json`. This checks browser integration, not model competence.
 
 ## 3. Live models against a local fixture — paid, opt-in
+
+The research CLI launches isolated Chrome automatically, headless by default.
+Add `--headfull` to watch the run, or `--headless` to explicitly hide it. Both flags
+work with the installed `jev-research` command and `examples/research.py`.
+The CLI closes its temporary profile and dedicated browser connection on exit.
+It does not reuse the user's logged-in Chrome profile.
 
 Do not run this as part of automated tests. Set the same TypeSafe/text-helper credentials used by the existing agent in `.env` (ignored by Git). In one terminal:
 

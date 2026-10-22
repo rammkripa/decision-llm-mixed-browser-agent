@@ -28,7 +28,9 @@ Every observation produces a new element table:
 ...
 ```
 
-The operations are `CLICK`, `TYPE_TEXT`, `SELECT`, `SCROLL_UP`, `SCROLL_DOWN`, `WAIT`, `DONE`, and `BLOCKED`. Only supported operations and targets are offered.
+The operations are `CLICK`, `TYPE_TEXT`, `PRESS_ENTER`, `SELECT`, `SCROLL_UP`, `SCROLL_DOWN`, `WAIT`, `DONE`, and `BLOCKED`. Only supported operations and targets are offered.
+`PRESS_ENTER` focuses an observed single-line input or search/combobox field and presses Enter
+to submit its current value or accept a suggestion. Ordinary multiline editors do not offer it.
 
 ```text
                       one TypeSafe request
@@ -97,6 +99,11 @@ uv run --env-file .env python examples/run.py \
 same guarded executor. Jev chooses a browser operation or an indexed passage to read;
 the text helper extracts facts with exact source quotes. Separate checks assess subtask
 requirements, the original goal, and the final answer before reporting completion.
+If the revised answer still contains unsupported statements, those statements are removed.
+The remaining statements and original goal are checked again before publishing, so removing
+an essential requirement or qualification cannot silently turn a failed task into a success.
+Rejected drafts and suppressed statements remain in the trace. Unsupported here means a
+statement failed the model's evidence check; it is not a definitive determination of falsehood.
 
 ```python
 from jev_ultrafast import ResearchAgent
@@ -117,6 +124,33 @@ The existing inspector and speed measurements describe the original `Agent`.
 [Live fixture results: two passes and one blocked run](docs/research-live-results.md).
 `uv run python scripts/check_research.py` exercises a real local browser with
 model doubles and an independent fixture oracle, without paid API calls.
+
+Run the research CLI with a dedicated local Chrome process:
+
+```bash
+# Headless is the default; --headless can also be supplied explicitly.
+uv run --env-file .env jev-research \
+  --url https://en.wikipedia.org/wiki/Main_Page \
+  --goal 'Find and summarize the two incompleteness theorems with sources.'
+
+# Show Chrome and bring the agent tab to the foreground.
+uv run --env-file .env jev-research --headfull \
+  --url https://en.wikipedia.org/wiki/Main_Page \
+  --goal 'Find and summarize the two incompleteness theorems with sources.'
+```
+
+The same flags work with `uv run --env-file .env python examples/research.py`.
+Each CLI run uses a fresh temporary Chrome profile and its own Browser Harness
+connection, so it does not inherit your usual browser logins. Chrome and that
+connection close when the run exits. Set `JEV_CHROME_BIN` to your Chrome executable
+if it is not found automatically. The Python library and original inspector
+continue to use their existing Browser Harness connection.
+
+In `--headfull` mode with an interactive terminal, recognized CAPTCHA/human-verification
+pages pause the agent. Solve the challenge in Chrome, then press Enter in the terminal
+to resume the same run with a fresh observation. Type `q` to stop. Headless or
+noninteractive runs stop with an actionable reason. Detection covers common visible
+challenge messages; it may miss challenges embedded in frames or using other wording.
 
 ## Why it moves
 
