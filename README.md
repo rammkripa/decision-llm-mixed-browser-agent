@@ -91,6 +91,33 @@ uv run --env-file .env python examples/run.py \
 
 `uv run --env-file .env python examples/flights.py --keep-open` performs the flight search, checks the actual route/date/results, and saves its trace. It does not select or book a flight.
 
+## Experimental planning and research
+
+`ResearchAgent` adds sequential outcome-based planning and document reading around the
+same guarded executor. Jev chooses a browser operation or an indexed passage to read;
+the text helper extracts facts with exact source quotes. Separate checks assess subtask
+requirements, the original goal, and the final answer before reporting completion.
+
+```python
+from jev_ultrafast import ResearchAgent
+
+with ResearchAgent(url, "Compare annual prices and cancellation conditions.") as agent:
+    for state in agent.run():
+        print(state["status"], len(state["evidence"]))
+    print(agent.result)
+```
+
+The opt-in CLI is `examples/research.py --url URL --goal 'Your goal'`; use
+`uv run --env-file .env python` to run it. It saves an audit trace under ignored
+`artifacts/`. This version owns one tab and allows two planning recoveries; it
+does not yet attach to your existing tabs or resume saved runs. Model verification is fallible.
+The existing inspector and speed measurements describe the original `Agent`.
+
+[Local test plan, fixture commands, and current limits](docs/research-testing.md).
+[Live fixture results: two passes and one blocked run](docs/research-live-results.md).
+`uv run python scripts/check_research.py` exercises a real local browser with
+model doubles and an independent fixture oracle, without paid API calls.
+
 ## Why it moves
 
 - **One request per decision cycle.** Operation and target heads share the same observed state.

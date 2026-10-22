@@ -4,12 +4,27 @@ import json
 import math
 import os
 import time
+from urllib.parse import urlparse
 
 import httpx
 
 from .questions import NEXT_ACTION, TARGET, TEXT_VALUE
 
 CLIENT = httpx.Client(http2=True, timeout=25)
+
+
+def text_options(base, name, limit):
+    """Provider-specific Chat Completions parameters; preserve the configured model."""
+    effort = os.environ.get("TEXT_MODEL_REASONING")
+    if urlparse(base).hostname == "api.openai.com":
+        options = {"max_completion_tokens": limit}
+        if name.startswith(("gpt-5", "gpt-6", "o1", "o3", "o4")) and effort:
+            options["reasoning_effort"] = effort
+        return options
+    reasoning = {"thinking": {"type": "disabled"}} if "api.deepseek.com/" in base else {"reasoning": {"effort": "low"}}
+    if effort == "none":
+        reasoning = {"reasoning": {"enabled": False}}
+    return {"max_tokens": limit, **reasoning}
 
 
 def post_json(url, key, body):
@@ -22,7 +37,13 @@ def post_json(url, key, body):
             time.sleep(0.5 * 2**attempt)
             continue
         if response.is_error:
-            raise RuntimeError(f"Model provider returned HTTP {response.status_code}; no action executed.")
+            try:
+                error = response.json().get("error", {})
+                detail = str(error.get("message", "")) if isinstance(error, dict) else ""
+                detail = detail.replace(key, "[redacted]")[:500]
+            except (ValueError, AttributeError):
+                detail = ""
+            raise RuntimeError(f"Model provider returned HTTP {response.status_code}; no action executed. {detail}")
         return response.json()
     raise RuntimeError("Model unavailable")
 
@@ -48,7 +69,7 @@ def validate_choice(answer, ids):
 def action_space(actions):
     """One index per observed element; each operation has its own valid target choices."""
     elements, indices, targets, controls = [], {}, {}, {}
-    operations = {"click": "CLICK", "fill": "TYPE_TEXT", "select": "SELECT"}
+    operations = {"click": "CLICK", "fill": "TYPE_TEXT", "select": "SELECT", "read": "READ_SECTION"}
     for action in actions:
         kind = action["kind"]
         if kind not in operations:
@@ -78,18 +99,19 @@ def action_space(actions):
     return elements, targets, controls
 
 
-def choose(state, goal, history):
+def choose(state, goal, history, *, rules=NEXT_ACTION, target_rules=TARGET):
     elements, targets, controls = action_space(state["actions"])
     labels = {
         "CLICK": "Click an element, button, menu option, autocomplete suggestion, or calendar day.",
         "TYPE_TEXT": "Enter or replace text in an editable field. A small LLM will supply the value from the goal.",
         "SELECT": "Select an observed dropdown value.",
+        "READ_SECTION": "Read an observed passage and extract relevant facts with exact supporting quotes.",
     }
     operations = {key: labels[key] for key in targets}
     operations.update({key: value["label"] for key, value in controls.items()})
     operations.update(DONE="Every requirement is visibly satisfied.", BLOCKED="No supported operation can progress.")
     questions = {
-        "operation": {"type": "choice", "criteria": operations, "instructions": {"goal": goal, "rules": NEXT_ACTION}}
+        "operation": {"type": "choice", "criteria": operations, "instructions": {"goal": goal, "rules": rules}}
     }
     for operation, candidates in targets.items():
         questions[operation.lower() + "_target"] = {
@@ -102,7 +124,7 @@ def choose(state, goal, history):
                 }
                 for index, a in candidates.items()
             },
-            "instructions": {"goal": goal, "operation": operation, "rules": [NEXT_ACTION, TARGET]},
+            "instructions": {"goal": goal, "operation": operation, "rules": [rules, target_rules]},
         }
     body = {
         "model": os.environ.get("TYPESAFE_MODEL", "jev-latest"),
@@ -163,18 +185,14 @@ def field_text(context):
         raise ValueError("TYPE_TEXT needs TEXT_MODEL_API_KEY; no text is hardcoded or guessed by the executor.")
     base = os.environ.get("TEXT_MODEL_BASE_URL", "https://api.deepseek.com/v1").rstrip("/")
     model = os.environ.get("TEXT_MODEL", "deepseek-chat")
-    reasoning = {"thinking": {"type": "disabled"}} if "api.deepseek.com/" in base else {"reasoning": {"effort": "low"}}
-    if os.environ.get("TEXT_MODEL_REASONING") == "none":
-        reasoning = {"reasoning": {"enabled": False}}
     started = time.perf_counter()
     result = post_json(
         base + "/chat/completions",
         key,
         {
             "model": model,
-            "max_tokens": 1024,
+            **text_options(base, model, 1024),
             "response_format": {"type": "json_object"},
-            **reasoning,
             "messages": [
                 {"role": "system", "content": TEXT_VALUE},
                 {
