@@ -1,0 +1,7 @@
+{
+  "name": "minotaur-console",
+  "private": true,
+  "type": "module",
+  "scripts": {"build": "node scripts/build-vercel.mjs", "test": "node --test tests/vercel.test.mjs"},
+  "dependencies": {"@vercel/sandbox": "3.9.0"}
+}

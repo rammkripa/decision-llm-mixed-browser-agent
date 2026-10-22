@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="console-token" content="__CONSOLE_TOKEN__">
+<title>Minotaur · Browser workspace</title><link rel="stylesheet" href="/console.css">
+</head>
+<body>
+<header><a class="brand" href="/" aria-label="Minotaur home"><span class="mark"><img src="/minotaur.png" alt=""></span> minotaur<span class="brand-note"> / task console</span></a><span class="cloud"><i></i> Browserbase cloud</span></header>
+<main>
+<div class="heading"><div><p class="eyebrow">HUMAN REASONING. BULLHEADED ACTION.</p><h1>Meet your guide through the web.</h1><p class="lede">Give Minotaur a goal. Watch it navigate, gather evidence, and bring back an answer.</p></div><span id="status" class="status">Ready</span></div>
+<div id="completion-time" class="completion-time" role="status" hidden><div><p class="eyebrow">TASK COMPLETE</p><p>Minotaur found the way.</p></div><div class="duration"><strong id="completion-duration"></strong><span>task time</span></div></div>
+<div id="notice" class="notice" role="status" hidden></div>
+<div class="workspace">
+<aside class="panel task-panel">
+<form id="task-form"><div class="panel-title"><span class="number">01</span><h2>Your task</h2></div>
+<label for="goal">What do you want to do?</label><textarea id="goal" required maxlength="2000" placeholder="Find the cheapest book in the Travel category and report its full title, price, and product link."></textarea>
+<label for="url">Start from <span class="optional">optional</span></label><input id="url" type="url" placeholder="https://www.google.com" aria-describedby="url-hint"><p id="url-hint" class="hint">Leave blank to start with Google.</p>
+<button id="run" class="primary" type="submit">Run task <span>↗</span></button>
+<div class="controls"><button type="button" id="pause" disabled>Pause</button><button type="button" id="stop" disabled>Stop</button></div>
+</form>
+<div class="examples"><p class="eyebrow">TRY A TASK</p><button class="example" data-example="books">Find a book’s details <span>↗</span></button><button class="example" data-example="webb">Research the Webb telescope <span>↗</span></button><button class="example" data-example="python">Compare Python sorting methods <span>↗</span></button></div>
+<div class="plan"><div class="panel-title"><span class="number">02</span><h2>Agent plan</h2></div><ol id="plan"><li class="muted">The plan will appear when your task starts.</li></ol></div>
+<div class="session-note"><span class="tiny-icon">◇</span><p>A fresh cloud browser for each task.<br>Automatically released when the run ends.</p></div>
+</aside>
+<div class="right-column">
+<section class="panel browser-panel"><div class="browser-toolbar"><span class="traffic"><i></i><i></i><i></i></span><span id="page-title">Live browser</span><a id="open-browser" target="_blank" rel="noopener noreferrer" hidden>Open ↗</a></div>
+<div class="viewport"><div id="browser-placeholder" class="placeholder"><img class="maze-art" src="/minotaur-maze.png" alt="Minotaur guiding a path through a maze of browser windows"><div class="welcome-copy"><h2>A little myth. A lot of follow-through.</h2><p>Start a task and follow Minotaur through the web.</p></div></div><iframe id="live-browser" title="Live Browserbase browser" sandbox="allow-scripts allow-same-origin" hidden></iframe></div>
+<div id="handoff" class="handoff" hidden><div><strong>Your turn</strong><p>The agent is paused. Use the browser above to finish verification, then continue.</p></div><button id="resume" class="primary">Continue task →</button></div>
+<div class="browser-footer"><span id="session-state"><i class="dot"></i> No active session</span><span id="elapsed">0:00</span></div></section>
+<section class="panel detail-panel"><div class="detail-header"><div class="tabs" role="tablist"><button id="activity-tab" role="tab" aria-selected="true" aria-controls="activity-pane">Activity</button><button id="output-tab" role="tab" aria-selected="false" aria-controls="output-pane">Output <span id="output-badge" hidden>●</span></button></div><div class="metrics"><span><b id="evidence-count">0</b> evidence</span><span><b id="call-count">0</b> calls</span></div></div>
+<div id="activity-pane" role="tabpanel" aria-labelledby="activity-tab"><div id="activity-empty" class="empty">The agent’s actions and evidence gathering will appear here.</div><ol id="timeline" class="timeline" aria-live="polite"></ol></div>
+<div id="output-pane" role="tabpanel" aria-labelledby="output-tab" hidden><p id="output-empty" class="empty">Your answer and supporting sources will appear here.</p><div id="answer" class="answer"></div><div id="sources" class="sources"></div></div>
+<div class="detail-footer"><span id="outcome-note">Ready when you are.</span><button id="download" disabled>Download trace ↓</button></div></section>
+</div></div>
+<section class="about-minotaur" aria-label="About Minotaur"><img src="/minotaur.png" alt="Minotaur, our bull-headed guide" loading="lazy"><div><p class="eyebrow">WHY MINOTAUR?</p><h2>The body of an LLM. The head of Jev.</h2><p>Minotaur is a browser agent with two parts working together. A language model plans, reads, and writes. Jev, TypeSafe’s decision model, chooses the next browser action and its target from the elements on the page. Together, they turn your goal into steps through the maze of the web.</p></div></section><footer class="footer"><span>Minotaur finds the way. Sources stay attached.</span><span id="config-status">Checking connection…</span><button id="retry-release" hidden>Retry closing browser</button></footer>
+</main><script src="/console.js"></script>
+</body></html>

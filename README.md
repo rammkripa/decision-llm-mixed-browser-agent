@@ -1,10 +1,14 @@
-<img src="docs/banner.svg" alt="Jev Ultrafast · Browser Use × TypeSafe" width="100%" />
+<img src="docs/banner.svg" alt="Minotaur · LLM reasoning × Jev decisions" width="100%" />
 
-# Jev Ultrafast ⚡
+# Minotaur
 
 > [!IMPORTANT]
 > **The Browser Use Cloud waitlist is open.** Get early access to ultrafast browser agents in the cloud.
 > **[Join the waitlist →](https://browser-use.com/ultrafast?utm_source=github&utm_medium=readme&utm_campaign=jev-ultrafast)**
+
+**The body of an LLM. The head of Jev.**
+
+Minotaur is a browser agent that pairs a language model’s planning, reading, and writing with Jev’s fast browser decisions. Like its namesake, it brings two halves together to find a path through the maze of the web.
 
 **A browser agent with a dynamic, indexed action space.**
 
@@ -53,7 +57,28 @@ Target questions are speculative. If the operation is `CLICK`, only `click_targe
 
 There are no site-specific action scripts or prepared field strings in the policy. The Flights example supplies a goal and independently verifies the outcome. The screenshot renderer adds labels afterward; it does not drive the browser.
 
-## Try it
+## Try the Minotaur web view
+
+Run `uv run --env-file .env jev-web` and open **http://127.0.0.1:8767**. Give Minotaur a goal to watch its cloud browser, follow its activity, and read answers with supporting sources. Cloud tasks require Browserbase credentials in addition to the model keys (see `.env.example`).
+
+## Deploy the Minotaur console to Vercel
+
+The Vercel adapter serves the console through a Node function and runs each Python task
+in its own Vercel Sandbox. Signed HttpOnly cookies reconnect the browser to its task;
+worker state and audit traces survive function restarts. Finished sandboxes are stopped
+when the console observes completion; their snapshots expire after 24 hours. Download
+traces before then. Browserbase sessions retain the 15-minute service timeout and tasks
+retain the 14-minute application limit. An expired worker is never automatically retried.
+
+Run `npm ci`, link a Vercel project, and configure the server-side variables from
+`.env.example` plus a random `CONSOLE_SESSION_SECRET` of at least 32 bytes. Enable Vercel
+OIDC for Sandbox access and Vercel Authentication for all deployments before sharing the
+console, since tasks use the configured model and browser accounts. Then run
+`vercel deploy --prod`. Source packaging excludes credentials and local traces. The
+existing `jev-web` command remains available for local use. `npm test` checks task
+validation and signed session isolation without external APIs.
+
+## Try the original inspector
 
 ```bash
 git clone https://github.com/browser-use/jev-ultrafast.git

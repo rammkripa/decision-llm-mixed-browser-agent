@@ -11,6 +11,7 @@ dependencies = ["browser-harness==0.1.13", "httpx[http2]>=0.28,<1"]
 jev = "jev_ultrafast.demo:main"
 jev-research = "jev_ultrafast.cli:main"
 jev-live-suite = "jev_ultrafast.live_suite:main"
+jev-web = "jev_ultrafast.web:main"
 
 [build-system]
 requires = ["hatchling"]
